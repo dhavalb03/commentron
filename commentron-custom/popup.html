@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Custom CommenTron</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Custom <span class="tron">CommenTron</span></h1>
+        </div>
+        
+        <div class="main">
+            <!-- API Configuration -->
+            <div class="section" id="api-section">
+                <h3>API Configuration</h3>
+                <input type="password" id="api-key" placeholder="Enter your Gemini API Key" />
+                <button id="save-api">Save API Key</button>
+            </div>
+
+            <!-- Comment Settings -->
+            <div class="section" id="settings-section">
+                <h3>Comment Settings</h3>
+                
+                <label for="comment-length">Comment Length:</label>
+                <select id="comment-length">
+                    <option value="super-short">Super Short</option>
+                    <option value="brief" selected>Brief</option>
+                    <option value="concise">Concise</option>
+                    <option value="in-length">In-Length</option>
+                    <option value="multi-paragraph">Multi-Paragraph</option>
+                </select>
+
+                <label for="tone">Tone:</label>
+                <select id="tone">
+                    <option value="supportive" selected>Supportive</option>
+                    <option value="excited">Excited</option>
+                    <option value="happy">Happy</option>
+                    <option value="gracious">Gracious</option>
+                    <option value="polite">Polite</option>
+                    <option value="witty">Witty</option>
+                    <option value="professional">Professional</option>
+                    <option value="thoughtful">Thoughtful</option>
+                </select>
+
+                <label for="industry">Industry Focus:</label>
+                <select id="industry">
+                    <option value="general" selected>General</option>
+                    <option value="technology">Technology</option>
+                    <option value="marketing">Marketing</option>
+                    <option value="healthcare">Healthcare</option>
+                    <option value="finance">Finance</option>
+                    <option value="education">Education</option>
+                    <option value="consulting">Consulting</option>
+                </select>
+
+                <label for="comment-style">Comment Style:</label>
+                <select id="comment-style">
+                    <option value="professional" selected>Professional & Strategic</option>
+                    <option value="casual">Casual & Human-like</option>
+                </select>
+                <div class="style-description">Professional: High-engagement comments using simple, clear language. Casual: Natural, conversational tone.</div>
+            </div>
+
+            <!-- Profile Management -->
+            <div class="section">
+                <h3>Profile-Aware Comments</h3>
+                <label>
+                    <input type="checkbox" id="use-profile-data" checked> 
+                    Use my LinkedIn profile for personalized comments
+                </label>
+                <label>
+                    <input type="checkbox" id="include-questions" checked> 
+                    Include questions in comments to boost engagement
+                </label>
+                <div class="profile-section">
+                    <div id="profile-info" class="profile-display">
+                        <div class="no-profile">No profile data stored. Navigate to your LinkedIn profile and click "Extract Profile" to personalize comments.</div>
+                    </div>
+                    <div class="profile-controls">
+                        <button id="extract-profile" class="secondary-btn">Extract Profile from Current Page</button>
+                        <button id="clear-profile" class="warning-btn" style="display:none;">Clear Profile Data</button>
+                    </div>
+                    <div class="profile-help">
+                        <small>💡 Navigate to your LinkedIn profile page and click "Extract Profile" to gather your professional information for more personalized comments.</small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Manual Comment Generation -->
+            <div class="section">
+                <h3>Generate Comment</h3>
+                <button id="generate-comment" class="primary-btn">Generate Comment for Current Post</button>
+                <div id="generated-comment" class="comment-display"></div>
+                <button id="post-comment" class="secondary-btn" style="display:none;">Post Comment</button>
+            </div>
+
+            <!-- Automation Controls -->
+            <div class="section">
+                <h3>Automation</h3>
+                <label>
+                    <input type="checkbox" id="auto-generate-on-click"> 
+                    Auto-generate when clicking comment buttons
+                </label>
+                <label>
+                    <input type="checkbox" id="auto-comment"> 
+                    Enable Auto-Comment (Current Page)
+                </label>
+                <div class="automation-settings">
+                    <label for="delay">Delay between comments (seconds):</label>
+                    <input type="number" id="delay" value="60" min="30" max="300">
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <div id="status" class="status"></div>
+        </div>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+</html>

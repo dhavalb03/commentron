@@ -1,0 +1,10 @@
+/* Minimal styles for content script */
+.custom-commentron-highlight {
+    border: 2px solid #6d46f4 !important;
+    border-radius: 4px !important;
+}
+
+.custom-commentron-processing {
+    opacity: 0.7 !important;
+    pointer-events: none !important;
+}

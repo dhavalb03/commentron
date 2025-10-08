@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CommenTron API Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .container { max-width: 600px; }
+        input, textarea, button { margin: 10px 0; padding: 10px; width: 100%; }
+        .result { background: #f5f5f5; padding: 15px; margin: 10px 0; border-radius: 5px; }
+        .error { background: #ffebee; color: #c62828; }
+        .success { background: #e8f5e8; color: #2e7d32; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>CommenTron API Test</h1>
+        
+        <div>
+            <label>Gemini API Key:</label>
+            <input type="password" id="apiKey" placeholder="Enter your Gemini API key" />
+        </div>
+        
+        <div>
+            <label>Test Post Content:</label>
+            <textarea id="postContent" rows="4" placeholder="Enter a LinkedIn post to generate a comment for...">Just published my latest article on AI trends in 2024. The integration of AI in everyday business processes is accelerating faster than we anticipated!</textarea>
+        </div>
+        
+        <button onclick="testAPI()">Test API</button>
+        
+        <div id="result"></div>
+    </div>
+
+    <script>
+        async function testAPI() {
+            const apiKey = document.getElementById('apiKey').value;
+            const content = document.getElementById('postContent').value;
+            const resultDiv = document.getElementById('result');
+            
+            if (!apiKey) {
+                resultDiv.innerHTML = '<div class="result error">Please enter your API key</div>';
+                return;
+            }
+            
+            if (!content) {
+                resultDiv.innerHTML = '<div class="result error">Please enter some post content</div>';
+                return;
+            }
+            
+            resultDiv.innerHTML = '<div class="result">Testing API... Please wait...</div>';
+            
+            try {
+                const prompt = `You are a professional LinkedIn engagement specialist. Generate thoughtful, valuable comments that add to the conversation.
+
+Please generate a supportive LinkedIn comment in response to this post:
+
+"${content}"
+
+Requirements:
+- Length: 2-3 sentences (50-100 words)
+- Tone: supportive and encouraging
+- Industry context: general
+- Add genuine value to the conversation
+- Be authentic and professional
+- Include a relevant insight or question if appropriate
+- Avoid generic responses like "Great post!" or "Thanks for sharing"
+
+The comment should feel natural and contribute meaningfully to the discussion.`;
+
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        contents: [{
+                            parts: [{
+                                text: prompt
+                            }]
+                        }],
+                        generationConfig: {
+                            temperature: 0.7,
+                            topK: 40,
+                            topP: 0.95,
+                            maxOutputTokens: 100
+                        }
+                    })
+                });
+                
+                console.log('Response status:', response.status);
+                
+                if (!response.ok) {
+                    const errorData = await response.text();
+                    console.error('API Error:', errorData);
+                    
+                    let errorMessage = 'API Error';
+                    try {
+                        const parsed = JSON.parse(errorData);
+                        errorMessage = parsed.error?.message || errorMessage;
+                    } catch (e) {
+                        errorMessage = errorData;
+                    }
+                    
+                    resultDiv.innerHTML = `<div class="result error">
+                        <strong>API Error (${response.status}):</strong><br>
+                        ${errorMessage}
+                    </div>`;
+                    return;
+                }
+                
+                const data = await response.json();
+                console.log('API Response:', data);
+                
+                if (!data.candidates || !data.candidates[0] || !data.candidates[0].content) {
+                    resultDiv.innerHTML = '<div class="result error">No comment generated. API returned empty response.</div>';
+                    return;
+                }
+                
+                const comment = data.candidates[0].content.parts[0]?.text?.trim();
+                
+                if (!comment) {
+                    resultDiv.innerHTML = '<div class="result error">Generated comment is empty.</div>';
+                    return;
+                }
+                
+                resultDiv.innerHTML = `<div class="result success">
+                    <strong>✅ API Test Successful!</strong><br><br>
+                    <strong>Generated Comment:</strong><br>
+                    "${comment}"
+                </div>`;
+                
+            } catch (error) {
+                console.error('Test error:', error);
+                resultDiv.innerHTML = `<div class="result error">
+                    <strong>Error:</strong><br>
+                    ${error.message}
+                </div>`;
+            }
+        }
+    </script>
+</body>
+</html>
