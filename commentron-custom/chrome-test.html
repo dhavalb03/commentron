@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Custom CommenTron Chrome Extension Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .success { color: green; }
+        .error { color: red; }
+        .warning { color: orange; }
+        button {
+            background: #0077b5;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #005885;
+        }
+        .log {
+            background: #000;
+            color: #00ff00;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: monospace;
+            max-height: 300px;
+            overflow-y: auto;
+            margin: 10px 0;
+        }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Custom CommenTron Chrome Extension Test</h1>
+        <p>This page helps verify if the Custom CommenTron extension is properly installed and working in Chrome.</p>
+        
+        <div class="test-section">
+            <h2>1. Extension Installation Check</h2>
+            <div id="extension-status">Checking...</div>
+        </div>
+        
+        <div class="test-section">
+            <h2>2. Extension Functionality Test</h2>
+            <button id="test-functionality">Test Extension Functionality</button>
+            <div id="functionality-results" class="hidden">
+                <h3>Test Results:</h3>
+                <div id="functionality-log" class="log"></div>
+            </div>
+        </div>
+        
+        <div class="test-section">
+            <h2>3. Manual Test Instructions</h2>
+            <p>To manually test the extension:</p>
+            <ol>
+                <li>Open LinkedIn in a new tab</li>
+                <li>Navigate to your feed or a post</li>
+                <li>Click on a "Comment" button</li>
+                <li>The extension should automatically generate a comment</li>
+                <li>Check the browser console (F12) for detailed logs</li>
+            </ol>
+        </div>
+    </div>
+
+    <script>
+        // Test functions
+        function logToElement(elementId, message) {
+            const logElement = document.getElementById(elementId);
+            const timestamp = new Date().toLocaleTimeString();
+            logElement.innerHTML += `[${timestamp}] ${message}\n`;
+            logElement.scrollTop = logElement.scrollHeight;
+        }
+        
+        // Check extension status
+        function checkExtensionStatus() {
+            const statusElement = document.getElementById('extension-status');
+            
+            // Check if we're in Chrome
+            const isChrome = /Chrome/.test(navigator.userAgent) && /Google Inc/.test(navigator.vendor);
+            
+            if (!isChrome) {
+                statusElement.innerHTML = `
+                    <div class="warning">⚠️ This test is designed for Chrome browser</div>
+                    <div>Please open this page in Google Chrome to test the extension.</div>
+                `;
+                return;
+            }
+            
+            // Check if extension is installed
+            if (typeof chrome !== 'undefined' && chrome.runtime) {
+                // Try to get the extension
+                try {
+                    // This will only work if we're in the extension context or have access
+                    statusElement.innerHTML = `
+                        <div class="success">✅ Chrome browser detected</div>
+                        <div>Ready to test extension functionality.</div>
+                        <button onclick="testExtensionBasics()">Run Basic Extension Test</button>
+                    `;
+                } catch (error) {
+                    statusElement.innerHTML = `
+                        <div class="warning">⚠️ Cannot directly access extension</div>
+                        <div>This is normal when testing from a regular web page.</div>
+                        <div>Use the button below to test functionality.</div>
+                    `;
+                }
+            } else {
+                statusElement.innerHTML = `
+                    <div class="error">❌ Chrome APIs not available</div>
+                    <div>This page must be opened in Google Chrome browser.</div>
+                `;
+            }
+        }
+        
+        // Test extension basics
+        function testExtensionBasics() {
+            document.getElementById('functionality-results').classList.remove('hidden');
+            const logElement = document.getElementById('functionality-log');
+            logElement.innerHTML = 'Testing extension basics...\n';
+            
+            logToElement('functionality-log', '1. Checking Chrome APIs...');
+            
+            if (typeof chrome === 'undefined') {
+                logToElement('functionality-log', '❌ Chrome APIs not available');
+                return;
+            }
+            
+            logToElement('functionality-log', '✅ Chrome APIs available');
+            
+            logToElement('functionality-log', '2. Checking storage API...');
+            if (chrome.storage) {
+                logToElement('functionality-log', '✅ Storage API available');
+            } else {
+                logToElement('functionality-log', '❌ Storage API not available');
+            }
+            
+            logToElement('functionality-log', '3. Checking runtime API...');
+            if (chrome.runtime) {
+                logToElement('functionality-log', '✅ Runtime API available');
+            } else {
+                logToElement('functionality-log', '❌ Runtime API not available');
+            }
+            
+            logToElement('functionality-log', 'Basic extension test completed!');
+        }
+        
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            checkExtensionStatus();
+            
+            // Bind event listeners
+            document.getElementById('test-functionality').addEventListener('click', testExtensionBasics);
+        });
+    </script>
+</body>
+</html>

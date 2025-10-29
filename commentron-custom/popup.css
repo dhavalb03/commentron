@@ -1,0 +1,259 @@
+body {
+    width: 400px;
+    margin: 0;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: #f5f5f5;
+}
+
+.container {
+    display: flex;
+    flex-direction: column;
+    min-height: 500px;
+}
+
+.header {
+    background: linear-gradient(135deg, #333 0%, #6d46f4 100%);
+    color: white;
+    padding: 20px;
+    text-align: center;
+}
+
+.header h1 {
+    margin: 0;
+    font-size: 24px;
+    font-weight: 400;
+}
+
+.tron {
+    font-weight: 600;
+}
+
+.main {
+    flex: 1;
+    padding: 20px;
+}
+
+.section {
+    margin-bottom: 20px;
+    padding: 15px;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.section h3 {
+    margin: 0 0 15px 0;
+    color: #333;
+    font-size: 16px;
+}
+
+label {
+    display: block;
+    margin: 10px 0 5px 0;
+    font-weight: 500;
+    color: #555;
+}
+
+input, select {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+    box-sizing: border-box;
+}
+
+input:focus, select:focus {
+    outline: none;
+    border-color: #6d46f4;
+    box-shadow: 0 0 0 2px rgba(109, 70, 244, 0.2);
+}
+
+button {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 4px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.primary-btn {
+    background: #6d46f4;
+    color: white;
+    width: 100%;
+    margin: 10px 0;
+}
+
+.primary-btn:hover {
+    background: #5a3bd4;
+}
+
+.secondary-btn {
+    background: #28a745;
+    color: white;
+    width: 100%;
+    margin: 10px 0;
+}
+
+.secondary-btn:hover {
+    background: #218838;
+}
+
+#save-api {
+    background: #333;
+    color: white;
+    width: 100%;
+    margin-top: 10px;
+}
+
+#save-api:hover {
+    background: #555;
+}
+
+.comment-display {
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 4px;
+    padding: 12px;
+    margin: 10px 0;
+    min-height: 60px;
+    font-style: italic;
+    color: #666;
+    display: none;
+}
+
+.comment-display.show {
+    display: block;
+}
+
+.automation-settings {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid #eee;
+}
+
+.footer {
+    padding: 15px 20px;
+    background: #333;
+    color: white;
+    text-align: center;
+}
+
+.status {
+    font-size: 12px;
+    opacity: 0.8;
+}
+
+.status.success {
+    color: #28a745;
+}
+
+.status.error {
+    color: #dc3545;
+}
+
+.status.warning {
+    color: #ffc107;
+}
+
+.status.info {
+    color: #17a2b8;
+}
+
+input[type="checkbox"] {
+    width: auto;
+    margin-right: 8px;
+}
+
+label:has(input[type="checkbox"]) {
+    display: flex;
+    align-items: center;
+    margin: 15px 0;
+}
+
+/* Profile Management Styles */
+.profile-section {
+    margin-top: 15px;
+}
+
+.profile-display {
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 4px;
+    padding: 12px;
+    margin: 10px 0;
+    min-height: 40px;
+    font-size: 13px;
+}
+
+.profile-data {
+    color: #333;
+}
+
+.profile-data div {
+    margin: 5px 0;
+    line-height: 1.4;
+}
+
+.profile-data strong {
+    color: #6d46f4;
+    font-weight: 600;
+}
+
+.no-profile {
+    color: #666;
+    font-style: italic;
+    text-align: center;
+}
+
+.profile-controls {
+    display: flex;
+    gap: 10px;
+    margin: 10px 0;
+}
+
+.profile-controls button {
+    flex: 1;
+    margin: 0;
+}
+
+.warning-btn {
+    background: #dc3545;
+    color: white;
+}
+
+.warning-btn:hover {
+    background: #c82333;
+}
+
+.profile-help {
+    margin-top: 10px;
+    padding: 8px;
+    background: #e3f2fd;
+    border-left: 3px solid #2196f3;
+    border-radius: 0 4px 4px 0;
+}
+
+.profile-help small {
+    color: #1976d2;
+    line-height: 1.4;
+}
+
+/* Comment Style Selection */
+#comment-style {
+    border: 2px solid #ddd;
+    font-weight: 600;
+}
+
+#comment-style:focus {
+    border-color: #6d46f4;
+    box-shadow: 0 0 0 3px rgba(109, 70, 244, 0.2);
+}
+
+.style-description {
+    font-size: 11px;
+    color: #666;
+    margin-top: 5px;
+    font-style: italic;
+}
