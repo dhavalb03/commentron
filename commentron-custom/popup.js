@@ -444,9 +444,7 @@ class CustomCommenTron {
                     topK: 30,
                     topP: 0.9,
                     maxOutputTokens: this.getMaxTokens(result.commentLength),
-                    candidateCount: 1,
-                    presencePenalty: 0.1,  // Slight penalty for repetition
-                    frequencyPenalty: 0.2  // Encourage variety while maintaining quality
+                    candidateCount: 1
                 }
             })
         });
@@ -842,13 +840,28 @@ Write like you're commenting as yourself - not as a perfect professional, but as
                 return;
             }
 
-            // Execute content script to extract profile data
-            const profileData = await chrome.scripting.executeScript({
+            // Execute content script to extract profile data (retry-aware)
+            const runExtract = async () => {
+                const res = await chrome.scripting.executeScript({
                 target: { tabId: tab.id },
                 func: this.extractLinkedInProfile
             });
-
-            const profile = profileData[0].result;
+                return res?.[0]?.result || null;
+            };
+            
+            let profile = await runExtract();
+            
+            // If first attempt fails (dynamic load), wait and retry with a small scroll to trigger hydration
+            if (!profile || (!profile.name && !profile.headline)) {
+                await chrome.scripting.executeScript({
+                    target: { tabId: tab.id },
+                    func: () => {
+                        window.scrollTo(0, 400);
+                        return new Promise(r => setTimeout(r, 1400));
+                    }
+                });
+                profile = await runExtract();
+            }
             
             if (profile && (profile.name || profile.headline)) {
                 // Store the profile data
@@ -881,83 +894,96 @@ Write like you're commenting as yourself - not as a perfect professional, but as
             profileUrl: window.location.href
         };
         
-        // Extract name
+        // Helper: clean text
+        const clean = (t) => (t || '').replace(/\s+/g, ' ').trim();
+        
+        // 1) Name — broaden selectors and add fallbacks
         const nameSelectors = [
+            'h1[data-anonymize="person-name"]',
             '.text-heading-xlarge',
             '.pv-text-details__left-panel h1',
             'h1.break-words',
-            '.profile-top-card__title'
+            '.profile-top-card__title',
+            'main h1',
+            'section.pv-top-card h1'
         ];
-        
         for (const selector of nameSelectors) {
-            const element = document.querySelector(selector);
-            if (element && element.textContent?.trim()) {
-                profileData.name = element.textContent.trim();
+            const el = document.querySelector(selector);
+            const text = clean(el?.textContent);
+            if (text && text.length > 2 && text.length < 80 && !/connections|followers|LinkedIn/i.test(text)) {
+                profileData.name = text;
                 break;
             }
         }
+        if (!profileData.name) {
+            // Try image alt pattern: "{Name}'s profile picture"
+            const img = Array.from(document.querySelectorAll('img[alt$="profile picture"], img[alt*="profile picture"]'))
+                .map(el => clean(el.getAttribute('alt')))
+                .find(a => a && a.includes("'s profile picture"));
+            if (img) {
+                profileData.name = clean(img.replace(/'s profile picture$/i, ''));
+            }
+        }
+        if (!profileData.name) {
+            // Try JSON-LD schema
+            const ld = Array.from(document.querySelectorAll('script[type="application/ld+json"]'))
+                .map(s => { try { return JSON.parse(s.textContent); } catch { return null; } })
+                .find(j => j && (j.name || (j['@type'] && /Person/i.test(j['@type']))));
+            if (ld && ld.name) profileData.name = clean(ld.name);
+        }
         
-        // Extract headline
+        // 2) Headline — skip counters/metrics
         const headlineSelectors = [
             '.text-body-medium.break-words',
             '.pv-text-details__left-panel .text-body-medium',
-            '.profile-top-card__headline'
+            '.profile-top-card__headline',
+            '.pv-top-card--list .text-body-medium',
+            'h1 + .text-body-medium',
+            '.text-heading-xlarge + .text-body-medium'
         ];
-        
         for (const selector of headlineSelectors) {
-            const element = document.querySelector(selector);
-            if (element && element.textContent?.trim() && 
-                !element.textContent.includes('connections') &&
-                !element.textContent.includes('followers')) {
-                profileData.headline = element.textContent.trim();
+            const el = document.querySelector(selector);
+            const text = clean(el?.textContent);
+            if (text && text.length > 8 && text.length < 160 && !/connections|followers/i.test(text)) {
+                profileData.headline = text;
                 break;
             }
         }
         
-        // Extract location
+        // 3) Location
         const locationSelectors = [
             '.text-body-small.inline.t-black--light.break-words',
-            '.pv-text-details__left-panel .text-body-small'
+            '.pv-text-details__left-panel .text-body-small',
+            '.profile-top-card__location'
         ];
-        
         for (const selector of locationSelectors) {
-            const element = document.querySelector(selector);
-            if (element && element.textContent?.trim() && 
-                !element.textContent.includes('connections') &&
-                !element.textContent.includes('followers')) {
-                profileData.location = element.textContent.trim();
-                break;
-            }
+            const el = document.querySelector(selector);
+            const text = clean(el?.textContent);
+            if (text && !/connections|followers/i.test(text)) { profileData.location = text; break; }
         }
         
-        // Extract top experience
-        const experienceItems = document.querySelectorAll('.pv-entity__summary-info, .experience-item');
-        experienceItems.forEach((item, index) => {
-            if (index < 3) { // Only top 3
-                const title = item.querySelector('h3, .pv-entity__summary-title')?.textContent?.trim();
-                const company = item.querySelector('.pv-entity__secondary-title')?.textContent?.trim();
-                
-                if (title && company) {
-                    profileData.experience.push({
-                        title,
-                        company: company.replace(/^at\s+/i, '')
-                    });
-                }
-            }
+        // 4) Experience — accept both old and new layouts
+        const experienceItems = document.querySelectorAll('.pv-entity__summary-info, .experience-item, [data-view-name="profile-component-experience"] li, section[id*="experience"] li');
+        experienceItems.forEach((item, idx) => {
+            if (idx >= 3) return;
+            const title = clean(item.querySelector('h3, .pv-entity__summary-title, [data-anonymize="title"]')?.textContent);
+            let company = clean(item.querySelector('.pv-entity__secondary-title, [data-anonymize="company"]')?.textContent);
+            if (company) company = company.replace(/^at\s+/i, '');
+            if (title && company) profileData.experience.push({ title, company });
         });
         
-        // Extract skills
-        const skillElements = document.querySelectorAll('.pv-skill-category-entity__name span[aria-hidden="true"]');
-        skillElements.forEach((element, index) => {
-            if (index < 10) { // Top 10 skills
-                const skill = element.textContent?.trim();
-                if (skill) {
-                    profileData.skills.push(skill);
-                }
-            }
+        // 5) Skills
+        const skillElements = document.querySelectorAll('.pv-skill-category-entity__name span[aria-hidden="true"], .skill-category-entity__name, [data-view-name="profile-component-skills"] li');
+        Array.from(skillElements).slice(0, 10).forEach(el => {
+            const s = clean(el.textContent);
+            if (s) profileData.skills.push(s);
         });
         
-        console.log('Extracted profile data:', profileData);
+        // 6) About
+        const aboutEl = document.querySelector('.pv-about__summary-text .break-words, [data-section="summary"] .break-words');
+        if (aboutEl) profileData.about = clean(aboutEl.textContent);
+        
+        console.log('Extracted profile data (robust):', profileData);
         return profileData;
     }
 

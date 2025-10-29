@@ -34,6 +34,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return true; // Keep channel open
     }
     
+    // Handle unknown messages
+    console.log('🔥 BACKGROUND: Unknown message action:', message.action);
+    sendResponse({ error: 'Unknown action: ' + message.action });
     return false;
 });
 
@@ -70,8 +73,10 @@ async function generateComment(postData, settings, userProfile) {
     for (const model of models) {
         try {
             console.log(`🔥 BACKGROUND: Trying ${model}`);
-            const result = await callAPI(model, prompt, settings.geminiApiKey, config);
+            let result = await callAPI(model, prompt, settings.geminiApiKey, config);
             console.log(`🔥 BACKGROUND: Success with ${model}`);
+            // Enforce diversity and context alignment
+            result = await ensureDiverseAndContextual(result, prompt, postData, settings.geminiApiKey, model, config);
             return result;
         } catch (error) {
             console.warn(`🔥 BACKGROUND: ${model} failed:`, error.message);
@@ -82,7 +87,134 @@ async function generateComment(postData, settings, userProfile) {
     }
 }
 
+function getLengthToTokens(lengthKey) {
+    // Map UI length to sensible max token limits
+    const tokenMap = {
+        'super-short': 80,
+        'brief': 140,
+        'concise': 220,
+        'in-length': 320,
+        'multi-paragraph': 460
+    };
+    return tokenMap[lengthKey] || 140;
+}
+
+function getToneTemperature(toneKey) {
+    // Make tone have a real stylistic effect via temperature
+    const toneToTemp = {
+        supportive: 0.6,
+        excited: 0.9,
+        happy: 0.75,
+        gracious: 0.55,
+        polite: 0.55,
+        witty: 0.85,
+        professional: 0.5,
+        thoughtful: 0.6
+    };
+    return toneToTemp[toneKey] ?? 0.7;
+}
+
+function getLengthPhrase(lengthKey) {
+    const lengthPhrases = {
+        'super-short': 'Write 1-2 quick sentences (under 40 words).',
+        'brief': 'Write 2-3 sentences (about 50–90 words).',
+        'concise': 'Write 3-4 sentences (about 90–140 words).',
+        'in-length': 'Write a solid paragraph of 4–6 sentences (about 140–220 words).',
+        'multi-paragraph': 'Write 2 short paragraphs (up to ~300 words).'
+    };
+    return lengthPhrases[lengthKey] || lengthPhrases['brief'];
+}
+
 function createProfessionalPrompt(postData, config, userProfile = null) {
+    // Build question guidance based on setting
+    let questionInstruction = '';
+    if (config.includeQuestions) {
+        questionInstruction = 'End with a thoughtful question that invites discussion.';
+    } else {
+        questionInstruction = 'Do NOT include any questions. End with a statement or observation.';
+    }
+    
+    // Build profile context if available
+    let profileContext = '';
+    if (userProfile && (userProfile.name || userProfile.headline || userProfile.experience?.length > 0)) {
+        console.log('🔥 BACKGROUND: Building profile-aware context');
+        
+        const experienceContext = userProfile.experience && userProfile.experience.length > 0 
+            ? userProfile.experience.slice(0, 2).map(exp => `${exp.title} at ${exp.company}`).join(', ')
+            : '';
+            
+        if (experienceContext) {
+            profileContext = `\nYour background: ${experienceContext}`;
+        }
+    }
+    
+    const professionalToneCues = {
+        supportive: `TONE: supportive. Affirm the point, add one practical tip, and keep language warm.
+EXAMPLE: "Appreciate this reminder—small, consistent behaviors like this change outcomes over time."`,
+        excited: `TONE: excited. Show controlled enthusiasm about momentum or results (one exclamation max). Focus on what's next.
+EXAMPLE: "Love the energy here—this unlocks faster learning loops for teams."`,
+        happy: `TONE: positive and upbeat. Keep it friendly and light; focus on wins without hype.
+EXAMPLE: "This is refreshing—simple actions that actually move work forward."`,
+        gracious: `TONE: appreciative. Acknowledge effort and offer one concise addition.
+EXAMPLE: "Thanks for laying this out so clearly—one thing that also helps is…"`,
+        polite: `TONE: courteous and respectful. Use neutral, precise language.
+EXAMPLE: "Clear framing. A helpful complement is …"`,
+        witty: `TONE: intelligent and lightly playful. One crisp analogy only; keep it professional.
+EXAMPLE: "This is the ‘lint roller’ for messy processes—quick, simple, effective."`,
+        professional: `TONE: professional. Use concise, outcome-focused language; minimize adjectives.
+EXAMPLE: "This reduces coordination cost and improves throughput across teams."`,
+        thoughtful: `TONE: thoughtful. Use cause-effect and trade-off language; connect to implications.
+EXAMPLE: "It shifts attention from outputs to behaviors, which compounds over time."`
+    };
+    const tonePhrase = professionalToneCues[config.tone] || `TONE: ${config.tone}. Keep it consistent throughout.`;
+    const lengthPhrase = getLengthPhrase(config.commentLength);
+
+    return `Write a LinkedIn comment that sounds exactly like a real person having a natural conversation.
+
+Post: "${postData.content}"${profileContext}
+
+Your task: Write like the successful comments below (these got 50+ impressions and one got 4K):
+
+${config.includeQuestions ? 
+`SUCCESSFUL EXAMPLES:
+"This story highlights the often-overlooked value of grit and resilience alongside technical skill. I wonder how many talented individuals are overlooked because they don't fit a traditional hiring mold?"
+
+"Love this simple yet powerful habit! I've found that reflecting on even small wins cultivates a much-needed sense of accomplishment and fuels motivation for the next day. What's been your biggest surprise from tracking your daily wins?"
+
+"Great reminder about often-overlooked hygiene! I wonder if the type of can material impacts the risk of contamination – perhaps aluminum is less porous than steel?"
+
+"The initial grind is intense. Your point about delegating after establishing a system is key; what tools or strategies did you find most effective for that transition?"` :
+`SUCCESSFUL EXAMPLES:
+"This story highlights the often-overlooked value of grit and resilience alongside technical skill. So many talented individuals are overlooked simply because they don't fit traditional hiring molds."
+
+"Love this simple yet powerful habit! Reflecting on even small wins cultivates a much-needed sense of accomplishment and fuels motivation for the next day."
+
+"Great reminder about often-overlooked hygiene! The type of can material likely impacts contamination risk – aluminum being less porous than steel."
+
+"The initial grind is intense. Your point about delegating after establishing a system is absolutely key to sustainable growth."`}
+
+MATCH THIS STYLE:
+- Start with natural phrases like "Love this", "Great point", "So true", "This highlights"
+- Use simple words everyone understands
+- Sound genuinely interested and thoughtful
+- Be conversational, like talking to a colleague
+- ${questionInstruction}
+- Write complete, flowing sentences
+- Show personal insight or experience
+${tonePhrase}
+${lengthPhrase}
+
+AVOID:
+- Starting with "This shows People really.."
+- Incomplete sentences
+- Business jargon or complex words
+- AI-sounding phrases
+- Multiple options or numbered lists
+
+Write ONE natural comment that sounds human and gets people to engage:`;
+}
+
+function createHumanLikePrompt(postData, config, userProfile = null) {
     const lengthTokens = {
         'super-short': 60,
         'brief': 120,
@@ -101,121 +233,14 @@ function createProfessionalPrompt(postData, config, userProfile = null) {
     
     // Build question guidance based on setting
     let questionGuidance = '';
-    let promptInstructions = '';
-    if (config.includeQuestions) {
-        questionGuidance = '• End with engaging questions 70% of the time\n';
-        promptInstructions = 'Generate a comment that shows expertise and gets discussion going';
-    } else {
-        questionGuidance = '• CRITICAL: ABSOLUTELY NO QUESTIONS ALLOWED - ZERO TOLERANCE\n• FORBIDDEN: No question marks (?) anywhere in the comment\n• BANNED: No interrogative words (what, how, why, when, where, who, which, can, could, would, will, should, do, does, did, is, are, was, were)\n• MANDATORY: End with strong statements, insights, or observations ONLY\n• REQUIRED: Use declarative sentences and definitive conclusions\n• STRICT: Any question will be considered a complete failure\n';
-        promptInstructions = 'Generate a comment with ZERO QUESTIONS - only statements, insights, and declarations. No question marks or interrogative language allowed whatsoever.';
-    }
-    
-    // Build profile context if available
-    let profileContext = '';
-    let professionalPerspective = '';
-    
-    if (userProfile && (userProfile.name || userProfile.headline || userProfile.experience?.length > 0)) {
-        console.log('🔥 BACKGROUND: Building profile-aware context');
-        
-        const experienceContext = userProfile.experience && userProfile.experience.length > 0 
-            ? userProfile.experience.slice(0, 2).map(exp => `${exp.title} at ${exp.company}`).join(', ')
-            : '';
-            
-        const skillsContext = userProfile.skills && userProfile.skills.length > 0 
-            ? userProfile.skills.slice(0, 5).join(', ')
-            : '';
-            
-        if (experienceContext) {
-            professionalPerspective = `
-
-YOUR PROFESSIONAL BACKGROUND:
-• Experience: ${experienceContext}
-• Skills: ${skillsContext || 'General business'}
-• Industry: ${config.industry || 'Professional services'}`;
-        }
-    }
-    
-    return `You are an expert LinkedIn engagement specialist. Your comments consistently receive 100+ likes and meaningful responses. You understand human psychology and what makes people want to engage.
-
-Post Content: "${postData.content}"${professionalPerspective}
-
-YOUR MISSION: Write a comment that feels like it came from a thoughtful industry expert who naturally drives engagement.
-
-CRITICAL WRITING RULES:
-• Every sentence MUST be complete with subject + verb + object
-• Use transitional phrases to connect ideas smoothly ("This shift", "What's interesting", "The real impact")
-• Build momentum from observation → insight → broader implication
-• End with a compelling statement that invites mental engagement
-${questionGuidance}
-• Write like you're having an intelligent conversation, not giving a presentation
-
-SENTENCE STRUCTURE EXAMPLES:
-❌ BAD: "AI tools change. Photography different now. Levels playing field."
-✅ GOOD: "This shift in AI tools demonstrates how technology democratizes expertise. What used to require hiring a professional photographer can now be achieved by anyone with the right tools."
-
-COMMENT FLOW TEMPLATE:
-1. **Hook with insight**: Start with "This [insight/trend/shift] shows..."
-2. **Personal angle**: "I've noticed..." or "What strikes me..."
-3. **Broader implication**: "The real impact is..." or "This means..."
-4. ${config.includeQuestions ? '**Engaging question**: Ask something that makes people think' : '**Strong conclusion**: End with a definitive statement about the future/impact'}
-
-HIGH-ENGAGEMENT EXAMPLES:
-${config.includeQuestions ? 
-`"This perfectly captures how AI is reshaping traditional barriers to entry. I've watched photography transform from requiring expensive equipment and years of training to being accessible to anyone with a smartphone and the right AI tools. The democratization we're seeing across industries is incredible – what other professional skills do you think will become accessible to everyone in the next few years?"
-
-"The shift you're describing highlights something fascinating about modern business. Traditional gatekeepers – whether photographers, designers, or even writers – are being replaced by accessible AI tools. This levels the playing field dramatically, especially for entrepreneurs and small businesses who couldn't afford professional services before. Which industries do you think will be most transformed by this democratization?"` :
-`"This perfectly captures how AI is reshaping traditional barriers to entry. What used to require expensive equipment and years of training is now accessible to anyone with a smartphone and the right AI tools. The democratization we're seeing across industries represents one of the most significant shifts in how business gets done."
-
-"The shift you're describing highlights something fascinating about modern business. Traditional gatekeepers are being replaced by accessible AI tools, which levels the playing field dramatically for entrepreneurs and small businesses who couldn't afford professional services before. This democratization of expertise is reshaping entire industries."` }
-
-AVOID THESE ENGAGEMENT KILLERS:
-• Sentence fragments ("Now, anyone.")
-• Choppy, disconnected thoughts
-• Generic observations without personal insight
-• Ending abruptly without impact
-• Corporate buzzword salad
-
-TONE: ${config.tone} but conversational and insightful
-
-LENGTH TARGET: ${lengthTokens[config.commentLength]} characters
-
-Generate a comment that ${promptInstructions} while demonstrating genuine expertise and sparking meaningful discussion.`;
-}
-
-function createHumanLikePrompt(postData, config, userProfile = null) {
-    const lengthTokens = {
-        'super-short': 40,   // ~40 characters - 1 sentence max
-        'brief': 80,         // ~80 characters - 1-2 sentences
-        'concise': 150,      // ~150 characters - 2-3 sentences
-        'in-length': 250,    // ~250 characters - 3-4 sentences
-        'multi-paragraph': 400  // ~400 characters - multiple sentences
-    };
-    
-    const lengthGuidelines = {
-        'super-short': 'Write ONLY 1 short sentence (maximum 40 characters). Be extremely brief.',
-        'brief': 'Write 1-2 short sentences (maximum 80 characters total). Keep it very brief.',
-        'concise': 'Write 2-3 sentences (maximum 150 characters total). Stay natural and concise.',
-        'in-length': 'Write 3-4 sentences (maximum 250 characters total). Be conversational.',
-        'multi-paragraph': 'Write multiple sentences (maximum 400 characters total). Stay natural.'
-    };
-    
-    // Detect content patterns for more specific responses
-    const contentLower = postData.content.toLowerCase();
-    const isAdvicePost = contentLower.includes('tip') || contentLower.includes('advice') || contentLower.includes('should');
-    const isPersonalStory = contentLower.includes('story') || contentLower.includes('experience') || contentLower.includes('learned');
-    const isOpinionPost = contentLower.includes('think') || contentLower.includes('believe') || contentLower.includes('opinion');
-    const isSuccessPost = contentLower.includes('success') || contentLower.includes('achievement') || contentLower.includes('milestone');
-    const isQuestionPost = postData.content.includes('?');
-    
-    // Build question guidance based on setting
-    let questionGuidance = '';
     let casualPromptInstructions = '';
     if (config.includeQuestions) {
-        questionGuidance = '• End with engaging questions 70% of the time\n';
-        casualPromptInstructions = 'curiosity, and strategic thinking while fostering meaningful professional discussion';
+        questionGuidance = '• End with one natural question that invites replies\n';
+        casualPromptInstructions = 'genuine curiosity and insight while fostering meaningful professional discussion';
     } else {
-        questionGuidance = '• CRITICAL: ABSOLUTELY NO QUESTIONS ALLOWED - ZERO TOLERANCE\n• FORBIDDEN: No question marks (?) anywhere in the comment\n• BANNED: No interrogative words (what, how, why, when, where, who, which, can, could, would, will, should, do, does, did, is, are, was, were)\n• MANDATORY: End with strong statements and natural observations\n• REQUIRED: Only use declarative sentences and insights\n• STRICT: Any question will be considered a complete failure\n';
-        casualPromptInstructions = 'insight, and strategic thinking while providing valuable professional perspective - ZERO QUESTIONS ALLOWED';
+        // Relaxed, human-friendly guidance (previously too strict and robotic)
+        questionGuidance = '• Do not include questions. End with a clear statement or observation\n';
+        casualPromptInstructions = 'insight and expertise while providing valuable professional perspective (no questions)';
     }
     
     // Build profile context if available
@@ -243,38 +268,73 @@ YOUR PROFESSIONAL BACKGROUND:
         }
     }
     
-    return `You're commenting on LinkedIn like a real person, not a business bot. Write naturally, like you're talking to someone at a coffee shop.
+    // Tone-specific style cues and micro-examples to increase divergence
+    const casualToneCues = {
+        witty: `STYLE: Keep it light, clever, and a touch playful. Use one subtle metaphor or wordplay, never sarcastic. Avoid formal phrasing.
+EXAMPLE OPENERS:
+- "Okay, this gave my brain a tiny high-five."
+- "Hot take, but this is the espresso shot most teams need."
+PHRASING HINTS: swap "utilize"→"use", "therefore"→"so", sprinkle one smart comparison.`,
+        thoughtful: `STYLE: Calm, reflective, and observant. Use cause-and-effect language and connect to broader implications. No punchlines.
+EXAMPLE OPENERS:
+- "This lands because it treats the root cause, not the symptom."
+- "What I appreciate here is the practical path from idea to behavior."
+PHRASING HINTS: use "it suggests", "it nudges", "the tradeoff is", avoid playful metaphors.`,
+        excited: `STYLE: High energy, optimistic, forward-looking. One exclamation max. Focus on momentum and next steps.`,
+        supportive: `STYLE: Warm and encouraging. Affirm the insight, add one helpful note from experience.`,
+        professional: `STYLE: Direct and businesslike. Prioritize clarity and impact over flair.`
+    };
+    const toneCue = casualToneCues[config.tone] || '';
+
+    return `You are writing a natural, conversational LinkedIn comment. Write like you're chatting with a colleague about something interesting you saw.
 
 Post Content: "${postData.content}"${professionalPerspective}
 
-CRITICAL: ${lengthGuidelines[config.commentLength]}
-
-WRITE LIKE A REAL HUMAN:
-• Use simple, everyday words
-• Sound like you're texting a friend about work
-• Be genuine and relatable
-• No fancy business speak or jargon
-• ${config.commentLength === 'super-short' ? 'Just one quick sentence!' : 'Keep it conversational and brief'}
+WRITE NATURALLY:
+• Use everyday words that anyone understands
+• Sound like you're talking, not writing a report
+• Be genuine and interested in the topic
+• NO business jargon or complicated words
+• NO multiple options or numbered points
 ${questionGuidance}
 
-REAL CASUAL EXAMPLES:
-${config.commentLength === 'super-short' ? 
-'• "This is so cool!"\n• "Love this setup."\n• "Game changer for sure."' : 
-config.commentLength === 'brief' ? 
-'• "This is incredible. The setup looks amazing."\n• "Love this approach. Really smart thinking."' : 
-'• "This setup is absolutely incredible. The way you\'ve combined tech with aesthetics is exactly what modern content creation should look like."'}
+${toneCue}
 
-AVOID SOUNDING LIKE:
-• A consultant or business expert
-• Someone giving a presentation
-• Using words like "articulated," "perceived value," "foundational"
-• Being too formal or stuffy
+YOUR NATURAL STYLE (like your successful comments):
+${config.includeQuestions ?
+`"Love this simple yet powerful habit! I've found that reflecting on even small wins cultivates a much-needed sense of accomplishment and fuels motivation for the next day. What's been your biggest surprise from tracking your daily wins?"
+
+"So true! It seems 'culture' is often the ghost in the machine – invisible until it malfunctions spectacularly (or beautifully). What's the weirdest cultural quirk you've encountered that really defined a company?"
+
+"Great reminder about often-overlooked hygiene! I wonder if the type of can material impacts the risk of contamination – perhaps aluminum is less porous than steel?"
+
+"The initial grind is intense. Your point about delegating after establishing a system is key; what tools or strategies did you find most effective for that transition?"` :
+`"Love this simple yet powerful habit! Reflecting on even small wins cultivates a much-needed sense of accomplishment and fuels motivation for the next day."
+
+"So true! Culture is often the ghost in the machine – invisible until it malfunctions spectacularly or beautifully transforms everything."
+
+"Great reminder about often-overlooked hygiene! The type of can material likely impacts contamination risk – aluminum being less porous than steel."
+
+"The initial grind is intense. Your point about delegating after establishing a system is absolutely key to sustainable growth."` }
+
+KEEP IT SIMPLE:
+• Use "help" not "assist"
+• Use "show" not "demonstrate"  
+• Use "use" not "utilize"
+• Use "start" not "commence"
+• Use "make" not "create"
+• Use "get" not "obtain"
+
+AVOID SOUNDING LIKE AI:
+• NO multiple numbered options
+• NO corporate buzzwords
+• NO overly formal language
+• NO phrases like "arms race" or "hyper-specialization"
 
 TONE: ${config.tone} and friendly
+LENGTH: Around ${lengthTokens[config.commentLength]} characters
 
-STRICT LIMIT: Maximum ${lengthTokens[config.commentLength]} characters.
-
-Write ${config.commentLength === 'super-short' ? 'one short sentence' : 'a brief, natural comment'} that ${casualPromptInstructions}.`;
+Write ONE simple, natural comment that shows you're genuinely interested in the topic.`;
 }
 
 async function callAPI(model, prompt, apiKey, config) {
@@ -288,14 +348,11 @@ async function callAPI(model, prompt, apiKey, config) {
         body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }],
             generationConfig: {
-                temperature: config.includeQuestions ? 0.7 : 0.5,  // Lower for more coherent statements
-                topK: config.includeQuestions ? 30 : 15,           // More focused vocabulary
-                topP: config.includeQuestions ? 0.9 : 0.8,         // Higher quality threshold
-                maxOutputTokens: 250,                              // Optimal length for complete thoughts
-                candidateCount: 1,
-                stopSequences: [],
-                presencePenalty: 0.4,   // Strong penalty against repetition
-                frequencyPenalty: 0.5   // Encourage varied, complete expressions
+                temperature: getToneTemperature(config.tone),
+                topK: 24,
+                topP: 0.85,
+                maxOutputTokens: getLengthToTokens(config.commentLength),
+                candidateCount: 1
             },
             safetySettings: [
                 {
@@ -340,30 +397,47 @@ async function callAPI(model, prompt, apiKey, config) {
     
     // Step 3: Improve sentence flow and completeness
     comment = improveSentenceFlow(comment);
+
+    // Step 3.5: Remove boilerplate sentences and duplicates
+    comment = removeBoilerplate(comment);
+
+    // Step 3.6: Tweak common openers to avoid template-y starts
+    comment = tweakOpeners(comment);
     
     // Step 4: Final cleanup and validation
     comment = finalCleanup(comment);
+    // Step 5: Absolute guard – strip any sentence containing banned terms
+    comment = removeBannedSentences(comment, postData.content);
     
     console.log('✅ BACKGROUND: Final processed comment:', comment);
     return comment;
 }
 
 function fixCapitalization(text) {
-    // Fix common capitalization issues
     let fixed = text;
     
-    // Fix sentences that start mid-word due to AI errors
-    fixed = fixed.replace(/([a-z])\s+([A-Z][a-z])/g, '$1. $2');
+    // Remove AI-sounding numbered options immediately
+    fixed = fixed.replace(/\*\*Option \d+[^\*]*\*\*[^\*]*\*/g, '');
+    fixed = fixed.replace(/Option \d+[^.]*/g, '');
+    fixed = fixed.replace(/\d+\./g, '');
     
-    // Fix random capital letters in middle of sentences
-    fixed = fixed.replace(/([a-z])\s+([A-Z])([a-z])/g, (match, before, capital, after) => {
-        // Don't fix proper nouns or acronyms
-        const word = capital + after;
-        const properNouns = ['LinkedIn', 'AI', 'API', 'CEO', 'CTO', 'HR', 'IT', 'SEO', 'ROI', 'KPI'];
-        if (properNouns.includes(word.split(' ')[0])) {
-            return match;
-        }
-        return `${before} ${capital.toLowerCase()}${after}`;
+    // Replace complex business terms with simple alternatives
+    const complexToSimple = {
+        'facilitate': 'help',
+        'utilize': 'use',
+        'demonstrate': 'show',
+        'leverage': 'use',
+        'optimize': 'improve',
+        'paradigm': 'way',
+        'ecosystem': 'system',
+        'hyper-specialization': 'specialization',
+        'content arms race': 'content competition',
+        'value proposition': 'value'
+    };
+    
+    Object.entries(complexToSimple).forEach(([complex, simple]) => {
+        const regex = new RegExp(`\\b${complex}\\b`, 'gi');
+        fixed = fixed.replace(regex, simple);
     });
     
     // Ensure sentences start with capital letters
@@ -398,40 +472,149 @@ function improveSentenceFlow(text) {
     console.log('🔧 FLOW: Starting sentence flow improvement');
     console.log('🔧 FLOW: Input:', improved);
     
-    // Fix common fragment patterns
-    // Pattern: "Word. Another word." -> "Word with another word."
-    improved = improved.replace(/([a-z]+)\. ([A-Z][a-z]+)\.(?=\s+[A-Z])/g, '$1 with $2.');
+    // Fix obvious broken patterns like "This shows People really.."
+    improved = improved.replace(/This shows People really\.\./g, 'This really shows how people');
+    improved = improved.replace(/People really\.\./g, 'people can really');
     
-    // Pattern: "Now, anyone." -> "Now anyone can do this."
-    improved = improved.replace(/Now,\s+anyone\./g, 'Now anyone can do this.');
+    // Fix incomplete sentences ending with ".." 
+    improved = improved.replace(/([a-z]+)\.\./g, '$1');
     
-    // Pattern: "Change. Something different." -> "Change means something different."
-    improved = improved.replace(/([A-Z][a-z]+)\. ([A-Z][a-z\s]+)\.(?=\s+[A-Z])/g, '$1 means $2.');
-    
-    // Fix incomplete sentences ending with periods
-    improved = improved.replace(/\b([A-Z][a-z]{1,4})\./g, (match, word) => {
-        const completeWord = {
-            'AI': 'AI technology',
-            'Now': 'Now everyone',
-            'This': 'This approach',
-            'But': 'But the reality',
-            'So': 'So the impact',
-            'Yet': 'Yet the benefits'
-        };
-        return completeWord[word] ? completeWord[word] + '.' : match;
-    });
-    
-    // Connect fragments that should be together
-    improved = improved.replace(/([a-z])\s+([A-Z][a-z\s]*\w)\s*\.(?=\s*[A-Z])/g, '$1, and $2.');
-    
-    // Fix choppy transitions
-    improved = improved.replace(/\.\s+([A-Z][a-z\s]*\w)\s*\.(?=\s+This|That|It|The)/g, '. $1, which');
-    
-    // Ensure sentences have proper subjects and verbs
-    improved = improved.replace(/^([A-Z][a-z]+)\s+([a-z]+)\./, '$1 really $2.');
+    // Clean up any remaining fragments
+    improved = improved.replace(/\b([A-Z][a-z]{1,4})\s*\.\s*$/g, '');
     
     console.log('🔧 FLOW: Output:', improved);
     return improved;
+}
+
+function removeBoilerplate(text) {
+    // Remove stock phrases and duplicate sentences that Gemini can overuse
+    const boilerplate = [
+        /This\s+shift\s+represents\s+a\s+fundamental\s+change\s+in\s+how\s+professionals\s+approach\s+their\s+craft\.?/i,
+        /This\s+represents\s+a\s+fundamental\s+shift\.?/i,
+        /This\s+marks\s+a\s+fundamental\s+shift\.?/i,
+        /A\s+fundamental\s+change\s+in\s+how\s+professionals\s+approach\s+their\s+craft\.?/i,
+        /At the end of the day,/i,
+        /In today'?s (fast-paced|rapidly changing) world/i,
+        /paradigm\s+shift/i,
+        /ever-?evolving\s+landscape/i,
+        // Generic openers/questions we want to avoid
+        /This\s+.*\s+highlights\b/i,
+        /I'?ve\s+noticed\b/i,
+        /The\s+real\s+impact\s+lies\b/i,
+        /Which\s+of\s+these\s+frameworks\s+resonates\b/i
+    ];
+    
+    // Split by sentence boundaries
+    const parts = text
+        .split(/(?<=[.!?])\s+/)
+        .map(s => s.trim())
+        .filter(s => s.length > 0);
+    
+    const seen = new Set();
+    const cleaned = [];
+    for (const s of parts) {
+        // Filter boilerplate
+        const isBoiler = boilerplate.some(rx => rx.test(s));
+        if (isBoiler) continue;
+        // De-dup (case-insensitive)
+        const key = s.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        cleaned.push(s);
+    }
+    
+    return cleaned.join(' ');
+}
+
+function tweakOpeners(text) {
+    let t = text;
+    // Replace templated openers with more human variants
+    t = t.replace(/^This\s+.*?\s+highlights\b/i, (m) => m.replace(/This/i, 'What stands out here')).trim();
+    t = t.replace(/^I'?ve\s+noticed\b/i, 'One thing I’ve run into');
+    t = t.replace(/^The\s+real\s+impact\s+lies\b/i, 'The value shows up when');
+    // Avoid trailing generic question prompts
+    t = t.replace(/Which\s+of\s+these\s+frameworks\s+resonates[^.!?]*[.!?]/i, '');
+    return t.trim();
+}
+
+function removeBannedSentences(text, postContent) {
+    const bannedRx = [
+        /fundamental\s+change/i,
+        /approach\s+their\s+craft/i,
+        /paradigm\s+shift/i,
+        /ever-?evolving\s+landscape/i
+    ];
+    const sentences = text.split(/(?<=[.!?])\s+/);
+    const kept = sentences.filter(s => !bannedRx.some(rx => rx.test(s)));
+    let out = kept.join(' ').trim();
+    if (!out) {
+        // Fallback: build a minimal, context-safe line from the post
+        const snippet = (postContent || '').trim().slice(0, 80);
+        out = snippet ? `Interesting takeaway here: ${snippet}` : 'Good insight with practical value.';
+    }
+    return out;
+}
+
+// Simple in-memory recent history to avoid repeats across quick generations
+let __recentComments = [];
+
+function sentenceSimilarity(a, b) {
+    const norm = s => new Set((s || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 2));
+    const A = norm(a), B = norm(b);
+    if (A.size === 0 || B.size === 0) return 0;
+    let inter = 0;
+    A.forEach(w => { if (B.has(w)) inter++; });
+    const union = new Set([...A, ...B]).size;
+    return inter / union;
+}
+
+async function ensureDiverseAndContextual(comment, basePrompt, postData, apiKey, model, config) {
+    const banned = [
+        'fundamental change',
+        'approach their craft',
+        'at the end of the day',
+        'in today\'s fast-paced',
+        'paradigm shift',
+        'ever-evolving landscape',
+        'highlights why',
+        "i've noticed",
+        'the real impact lies',
+        'which of these frameworks resonates'
+    ];
+    // If comment contains banned phrases, or is too similar to recent ones, re-roll once with constraints
+    const hasBanned = banned.some(p => comment.toLowerCase().includes(p));
+    const tooSimilar = __recentComments.some(prev => sentenceSimilarity(comment, prev) > 0.55);
+    const lacksConcrete = !hasConcreteReference(comment, postData.content);
+    
+    if (hasBanned || tooSimilar || lacksConcrete) {
+        console.log('🎯 DIVERSITY: Rerolling due to', { hasBanned, tooSimilar, lacksConcrete });
+        const avoidList = banned.map(p => `"${p}"`).join(', ');
+        const reinforcement = `\nRESTRICTIONS:\n- Do NOT use: ${avoidList}.\n- Reference at least ONE concrete noun or phrase from the post (quote it).\n- Avoid generic openers like "This X highlights" or "I’ve noticed".\n- Ask a specific question tied to the quoted phrase (if questions are enabled).\n- Vary sentence lengths (mix short and medium).\n- Keep the selected TONE and LENGTH constraints.`;
+        const diversifiedPrompt = basePrompt + reinforcement;
+        // Slight temperature jitter for diversity
+        const jittered = { ...config, tone: config.tone, __tempOverride: Math.min(0.95, Math.max(0.45, getToneTemperature(config.tone) + (Math.random() * 0.12 - 0.06))) };
+        let diversified = await callAPI(model, diversifiedPrompt, apiKey, jittered);
+        // Final safety: if still similar, lightly paraphrase by appending a targeted instruction
+        if (__recentComments.some(prev => sentenceSimilarity(diversified, prev) > 0.55)) {
+            diversified = diversified.replace(/\b(This|That|It)\b/g, '');
+        }
+        __recentComments.unshift(diversified);
+        __recentComments = __recentComments.slice(0, 6);
+        return diversified;
+    }
+    __recentComments.unshift(comment);
+    __recentComments = __recentComments.slice(0, 6);
+    return comment;
+}
+
+function hasConcreteReference(text, postContent) {
+    // Require an overlapping content word (noun-ish heuristic) to ensure context use
+    const words = (s) => (s || '').toLowerCase().match(/[a-z0-9]{4,}/g) || [];
+    const postWords = new Set(words(postContent));
+    const commentWords = new Set(words(text));
+    let overlap = 0;
+    commentWords.forEach(w => { if (postWords.has(w)) overlap++; });
+    return overlap >= 1; // at least one concrete overlap
 }
 
 function finalCleanup(text) {
@@ -449,50 +632,35 @@ function finalCleanup(text) {
     // Remove leading/trailing spaces and periods
     cleaned = cleaned.replace(/^[\s.]+|[\s.]+$/g, '').trim();
     
+    // Fix broken sentences like "This shows People really.."
+    cleaned = cleaned.replace(/This shows People really\.\./g, 'This really shows how');
+    cleaned = cleaned.replace(/People really\.\./, 'people can really');
+    
+    // Fix incomplete fragments
+    cleaned = cleaned.replace(/^([A-Za-z\s]{1,20})\.\.\s*/, 'This really highlights how ');
+    
+    // Light anti-AI phrasing cleanup
+    const bannedPhrases = [
+        /this resonates/gi,
+        /thanks for sharing/gi,
+        /great post/gi,
+        /arms race/gi,
+        /hyper[- ]specialization/gi,
+        /this shift represents a fundamental change in how professionals approach their craft\.?/gi
+    ];
+    bannedPhrases.forEach(rx => { cleaned = cleaned.replace(rx, ''); });
+
     // Ensure proper ending punctuation
-    if (cleaned && !cleaned.match(/[.!]$/)) {
+    if (cleaned && !cleaned.match(/[.!?]$/)) {
         cleaned += '.';
     }
     
-    // Validate sentence completeness and fix if needed
-    const sentences = cleaned.split(/[.!]\s+/).filter(s => s.trim());
-    const improvedSentences = sentences.map(sentence => {
-        const trimmed = sentence.trim();
-        if (trimmed.length < 10) {
-            // Too short, likely fragment
-            return null;
-        }
-        
-        // Check if sentence has subject and verb
-        const words = trimmed.split(/\s+/);
-        if (words.length < 3) {
-            // Too few words, expand
-            if (trimmed.toLowerCase().startsWith('this')) {
-                return `${trimmed} demonstrates the power of technological advancement`;
-            } else if (trimmed.toLowerCase().includes('change')) {
-                return `${trimmed} represents a significant shift in the industry`;
-            } else {
-                return `${trimmed} shows the evolving landscape of professional services`;
-            }
-        }
-        
-        return trimmed;
-    }).filter(Boolean);
-    
-    if (improvedSentences.length === 0) {
-        cleaned = 'This development highlights how technology continues to democratize professional services and level the playing field for everyone.';
-    } else {
-        cleaned = improvedSentences.join('. ') + '.';
-    }
+    // Remove any remaining double periods
+    cleaned = cleaned.replace(/\.\./g, '.');
     
     // Ensure comment starts with capital letter
     if (cleaned.length > 0) {
         cleaned = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
-    }
-    
-    // Ensure minimum quality threshold
-    if (cleaned.length < 40) {
-        cleaned += ' This shift represents a fundamental change in how professionals approach their craft.';
     }
     
     console.log('🧹 CLEANUP: Output:', cleaned);

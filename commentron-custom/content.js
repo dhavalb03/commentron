@@ -8,6 +8,27 @@
         return;
     }
     
+    // Early context validation before initialization
+    try {
+        if (!chrome || !chrome.runtime || !chrome.storage) {
+            console.error('❌ Chrome APIs not available at load time - skipping initialization');
+            return;
+        }
+        
+        // Test if extension context is valid
+        const testId = chrome.runtime.id;
+        if (!testId) {
+            console.error('❌ Extension context appears invalidated at load time - skipping initialization');
+            return;
+        }
+        
+        console.log('✅ Extension context valid at load time, proceeding with initialization');
+        
+    } catch (error) {
+        console.error('❌ Extension context test failed at load time:', error);
+        return;
+    }
+    
     console.log('🚀 CommenTron initializing...');
     window.commentronInitialized = true;
     
@@ -58,15 +79,33 @@ class LinkedInCommentBot {
         console.log('🔥 === INIT METHOD START ===');
         console.log('📋 LinkedInCommentBot init() called');
         
-        // Test if chrome.runtime is available
+        // Enhanced chrome runtime availability test
         console.log('🔍 Testing chrome.runtime availability...');
         try {
-            if (!chrome.runtime || !chrome.runtime.onMessage) {
-                console.error('❌ Chrome runtime not available');
+            // Check if chrome object and required APIs exist
+            if (!chrome || !chrome.runtime || !chrome.storage) {
+                console.error('❌ Chrome APIs not available');
                 this.contextValid = false;
                 return;
             }
-            console.log('✅ Chrome runtime available');
+            
+            // Check for runtime errors
+            if (chrome.runtime.lastError) {
+                console.error('❌ Chrome runtime has errors:', chrome.runtime.lastError.message);
+                this.contextValid = false;
+                return;
+            }
+            
+            // Test if we can access runtime id (this will fail if context is invalidated)
+            const runtimeId = chrome.runtime.id;
+            if (!runtimeId) {
+                console.error('❌ Cannot access runtime ID - context likely invalidated');
+                this.contextValid = false;
+                return;
+            }
+            
+            console.log('✅ Chrome runtime available with ID:', runtimeId);
+            
         } catch (error) {
             console.error('❌ Chrome runtime test failed:', error);
             this.contextValid = false;
@@ -113,7 +152,7 @@ class LinkedInCommentBot {
             return;
         }
         
-        // Set up comment button listeners
+        // Set up comment button listeners using aggressive detection
         this.setupCommentButtonListeners();
         
         // Re-setup listeners when new content loads (for infinite scroll)
@@ -122,76 +161,169 @@ class LinkedInCommentBot {
         console.log('✅ LinkedInCommentBot setup complete!');
     }
     
-    setupCommentButtonListeners() {
-        console.log('Setting up TARGETED comment button listeners...');
+    // Add a new method for aggressive button detection
+    findAllCommentButtonsAggressively() {
+        console.log('🔍 AGGRESSIVE BUTTON DETECTION STARTED');
+        
+        const allButtons = Array.from(document.querySelectorAll('button'));
+        console.log(`Found ${allButtons.length} total buttons`);
         
         let commentButtons = new Set();
         
-        // STRATEGY: Only target comment buttons in main post action bars, completely ignore comment boxes
-        // 1. Look for buttons specifically in social action areas
-        const actionBarButtons = document.querySelectorAll('.social-actions-buttons button, .feed-shared-social-action-bar button');
-        console.log(`Found ${actionBarButtons.length} buttons in action bars`);
-        
-        actionBarButtons.forEach(button => {
-            const buttonText = button.innerText?.toLowerCase()?.trim() || '';
-            const ariaLabel = button.getAttribute('aria-label')?.toLowerCase() || '';
+        allButtons.forEach((button, index) => {
+            // Skip buttons in comment areas
+            if (button.closest('.comments-comment-box') || button.closest('.comments-comment-item')) {
+                return;
+            }
             
-            // Must be a comment button AND not inside any comment input area
-            if ((buttonText.includes('comment') || ariaLabel.includes('comment')) && 
-                !button.closest('.comments-comment-box') &&  // NOT in comment input area
-                !button.closest('.comments-comment-item') && // NOT in comment thread
-                !button.classList.contains('artdeco-button--primary')) { // NOT primary (blue) buttons
-                
+            let isCommentButton = false;
+            let detectionMethods = [];
+            
+            // Method 1: Text content check
+            const text = button.textContent?.toLowerCase().trim();
+            if (text && (text.includes('comment') || text.includes('reply'))) {
+                isCommentButton = true;
+                detectionMethods.push('text-content');
+            }
+            
+            // Method 2: aria-label check
+            const ariaLabel = button.getAttribute('aria-label')?.toLowerCase();
+            if (ariaLabel && (ariaLabel.includes('comment') || ariaLabel.includes('reply'))) {
+                isCommentButton = true;
+                detectionMethods.push('aria-label');
+            }
+            
+            // Method 3: SVG icon check
+            const svgs = button.querySelectorAll('svg');
+            svgs.forEach(svg => {
+                const svgLabel = svg.getAttribute('aria-label')?.toLowerCase();
+                if (svgLabel && (svgLabel.includes('comment') || svgLabel.includes('reply'))) {
+                    isCommentButton = true;
+                    detectionMethods.push('svg-icon');
+                }
+            });
+            
+            // Method 4: Your specific class pattern check
+            const className = button.className;
+            const targetClasses = [
+                '_378e4e04', '_70c86b6e', '_1135656f', '_745e5993', 'ad33a2c1', 
+                '_61692392', 'b9af560e', '_410bc68f', 'e82dd3ff', '_76f290d6', 
+                '_994a230f', 'aaedb2eb', '_0638958e'
+            ];
+            
+            let classMatches = 0;
+            targetClasses.forEach(cls => {
+                if (className.includes(cls)) {
+                    classMatches++;
+                }
+            });
+            
+            if (classMatches >= 3) { // If at least 3 classes match
+                isCommentButton = true;
+                detectionMethods.push(`class-pattern(${classMatches}/${targetClasses.length})`);
+            }
+            
+            // Method 5: Artdeco elements check
+            const artdecoText = button.querySelector('.artdeco-button__text');
+            if (artdecoText) {
+                const artdecoContent = artdecoText.textContent?.toLowerCase().trim();
+                if (artdecoContent && artdecoContent.includes('comment')) {
+                    isCommentButton = true;
+                    detectionMethods.push('artdeco-text');
+                }
+            }
+            
+            // Method 6: Social action context check
+            const parent = button.closest('.feed-shared-social-action-bar, .social-actions, .feed-shared-social-actions');
+            if (parent && detectionMethods.length > 0) {
+                detectionMethods.push('social-context');
+            }
+            
+            if (isCommentButton) {
                 commentButtons.add(button);
-                console.log('✅ Added main action bar comment button:', {
-                    text: buttonText,
+                console.log(`✅ DETECTED COMMENT BUTTON #${index}:`, {
+                    methods: detectionMethods,
+                    text: text,
                     ariaLabel: ariaLabel,
-                    className: button.className
-                });
-            } else {
-                console.log('❌ Skipped button:', {
-                    text: buttonText,
-                    reason: button.closest('.comments-comment-box') ? 'in comment box' : 
-                           button.closest('.comments-comment-item') ? 'in comment thread' :
-                           button.classList.contains('artdeco-button--primary') ? 'primary button' : 'no comment text'
+                    className: className.substring(0, 100)
                 });
             }
         });
         
-        console.log(`🎯 Total main action bar comment buttons: ${commentButtons.size}`);
+        console.log(`🎯 TOTAL COMMENT BUTTONS DETECTED: ${commentButtons.size}`);
+        return commentButtons;
+    }
+
+    setupCommentButtonListeners() {
+        console.log('🚀 SETTING UP COMMENT BUTTON LISTENERS (AGGRESSIVE MODE)');
         
-        // Add event listeners ONLY to verified main action bar buttons
-        commentButtons.forEach(button => {
-            if (!button.dataset.commentronEnabled) {
-                button.dataset.commentronEnabled = 'true';
+        // Use aggressive detection
+        const commentButtons = this.findAllCommentButtonsAggressively();
+        
+        if (commentButtons.size === 0) {
+            console.log('⚠️ NO COMMENT BUTTONS FOUND, TRYING ALTERNATIVE APPROACH');
+            
+            // Try one more time with a broader search
+            const allButtons = document.querySelectorAll('button');
+            allButtons.forEach(button => {
+                // Skip if in comment area
+                if (button.closest('.comments-comment-box') || button.closest('.comments-comment-item')) {
+                    return;
+                }
                 
-                button.addEventListener('click', (e) => {
-                    console.log('🎯 MAIN ACTION BAR comment button clicked!', {
+                // Look for buttons in social action areas with any SVG
+                const parent = button.closest('.feed-shared-social-action-bar, .social-actions, .feed-shared-social-actions');
+                const svgs = button.querySelectorAll('svg');
+                
+                if (parent && svgs.length > 0) {
+                    commentButtons.add(button);
+                    console.log('✅ ADDED BUTTON FROM ALTERNATIVE APPROACH:', {
                         className: button.className,
-                        text: button.innerText?.trim()
+                        parentClass: parent.className,
+                        svgCount: svgs.length
                     });
-                    
-                    // Add immediate debugging
-                    console.log('🔥 Button click event fired - about to call handleCommentButtonClick');
-                    console.log('🔥 Event object:', e);
-                    console.log('🔥 Button element:', button);
-                    console.log('🔥 Extension context valid:', this.contextValid);
-                    
-                    try {
-                        this.handleCommentButtonClick(e, button);
-                    } catch (error) {
-                        console.error('🔥 CRITICAL ERROR in click handler:', error);
-                        console.error('🔥 Error stack:', error.stack);
-                    }
-                }, true);
-                
-                console.log('✅ Added listener to verified main action bar comment button');
+                }
+            });
+        }
+        
+        console.log(`🎯 ATTACHING TO ${commentButtons.size} COMMENT BUTTONS`);
+        
+        // Add event listeners to all detected comment buttons
+        commentButtons.forEach((button, index) => {
+            // Remove any existing listeners to prevent duplicates
+            if (button._commentronHandler) {
+                button.removeEventListener('click', button._commentronHandler);
             }
+            
+            // Create a handler specific to this button
+            const handler = (e) => {
+                console.log(`🎯 COMMENT BUTTON #${index} CLICKED!`, {
+                    className: button.className,
+                    text: button.textContent?.trim(),
+                    ariaLabel: button.getAttribute('aria-label')
+                });
+                
+                try {
+                    this.handleCommentButtonClick(e, button);
+                } catch (error) {
+                    console.error('🔥 ERROR IN COMMENT BUTTON HANDLER:', error);
+                    console.error('Error stack:', error.stack);
+                }
+            };
+            
+            // Store reference to remove later if needed
+            button._commentronHandler = handler;
+            
+            // Add the listener with capture phase to ensure we catch the event
+            button.addEventListener('click', handler, true);
+            console.log(`✅ ATTACHED TO BUTTON #${index}`);
         });
+        
+        console.log('🚀 COMMENT BUTTON SETUP COMPLETE');
     }
     
     observeForNewContent() {
-        console.log('Setting up content observer for artdeco-button__text elements...');
+        console.log('Setting up content observer for comment buttons...');
         
         const observer = new MutationObserver((mutations) => {
             let shouldSetupListeners = false;
@@ -200,20 +332,24 @@ class LinkedInCommentBot {
                 if (mutation.addedNodes.length > 0) {
                     mutation.addedNodes.forEach((node) => {
                         if (node.nodeType === Node.ELEMENT_NODE) {
-                            // Check if new artdeco-button__text elements were added
-                            const hasCommentButton = 
+                            // Check if new comment-related elements were added
+                            const hasCommentElements = 
                                 node.querySelector && (
                                     node.querySelector('.artdeco-button__text') ||
                                     node.querySelector('button[aria-label*="Comment"]') ||
-                                    node.querySelector('button[aria-label*="comment"]')
+                                    node.querySelector('button[aria-label*="comment"]') ||
+                                    node.querySelector('button svg[aria-label*="comment"]') ||
+                                    node.querySelector('button svg[aria-label*="Comment"]') ||
+                                    (node.tagName === 'BUTTON' && 
+                                     node.textContent?.toLowerCase().includes('comment'))
                                 ) ||
                                 (node.classList && node.classList.contains('artdeco-button__text')) ||
                                 (node.tagName === 'BUTTON' && 
-                                 node.innerText?.toLowerCase().includes('comment'));
+                                 node.textContent?.toLowerCase().includes('comment'));
                             
-                            if (hasCommentButton) {
+                            if (hasCommentElements) {
                                 shouldSetupListeners = true;
-                                console.log('New artdeco-button__text or comment button detected, will re-setup listeners');
+                                console.log('New comment-related elements detected, will re-setup listeners');
                             }
                         }
                     });
@@ -234,31 +370,73 @@ class LinkedInCommentBot {
             subtree: true
         });
         
-        console.log('Content observer started for artdeco-button__text');
+        console.log('Content observer started for comment buttons');
     }
     
     async handleCommentButtonClick(event, button) {
         console.log('🔥 === HANDLE COMMENT BUTTON CLICK START ===');
-        console.log('🔥 Event:', event);
-        console.log('🔥 Button:', button);
+        console.log('🔥 Event type:', event.type);
+        console.log('🔥 Event timestamp:', event.timeStamp);
+        console.log('🔥 Button element:', button);
+        console.log('🔥 Button text content:', button.textContent?.trim());
+        console.log('🔥 Button aria-label:', button.getAttribute('aria-label'));
+        console.log('🔥 Button class name:', button.className);
+        
+        // Add immediate debug logging
+        console.log('🔥 IMMEDIATE DEBUG: handleCommentButtonClick called successfully');
         
         try {
             console.log('🔥 Comment button click handler triggered!');
             
-            // Check if context is still valid
+            // Enhanced context validation
             if (!this.contextValid) {
-                console.error('❌ Extension context invalid, cannot proceed');
+                console.error('❌ Extension context is invalid!');
                 return;
             }
-            console.log('✅ Extension context is valid');
             
-            // Test chrome runtime before proceeding
+            // Test chrome runtime with comprehensive error handling
             console.log('🔍 Testing chrome runtime...');
             try {
-                await chrome.storage.local.get(['test']);
+                // Test if chrome object exists and has required properties
+                if (!chrome || !chrome.runtime || !chrome.storage) {
+                    throw new Error('Chrome APIs not available');
+                }
+                
+                // Test runtime connection
+                if (chrome.runtime.lastError) {
+                    throw new Error(`Runtime error: ${chrome.runtime.lastError.message}`);
+                }
+                
+                // Quick storage test with timeout
+                const testPromise = chrome.storage.local.get(['test']);
+                const timeoutPromise = new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('Storage test timeout')), 1000)
+                );
+                
+                await Promise.race([testPromise, timeoutPromise]);
                 console.log('✅ Chrome runtime test passed');
+                
             } catch (error) {
                 console.error('❌ Chrome runtime test failed:', error);
+                
+                // Check if this is a context invalidation error
+                if (error.message?.includes('context invalidated') || 
+                    error.message?.includes('Extension context') ||
+                    error.message?.includes('receiving end does not exist')) {
+                    
+                    console.error('❌ EXTENSION CONTEXT INVALIDATED - Extension needs reload');
+                    this.contextValid = false;
+                    
+                    // Show user-friendly message
+                    const postContainer = button.closest('.feed-shared-update-v2, .occludable-update');
+                    if (postContainer) {
+                        this.showTemporaryMessage(postContainer, '⚠️ Extension reloaded. Please refresh the page.', 'warning');
+                    }
+                    
+                    return;
+                }
+                
+                // For other errors, mark context as invalid and return
                 this.contextValid = false;
                 return;
             }
@@ -272,17 +450,23 @@ class LinkedInCommentBot {
                 apiKeyLength: settings.geminiApiKey?.length || 0
             });
             
-            if (!settings.autoGenerateOnClick) {
+            // Add explicit check for autoGenerateOnClick
+            console.log('🔍 Auto-generate setting check:');
+            console.log('  Setting value:', settings.autoGenerateOnClick);
+            console.log('  Setting type:', typeof settings.autoGenerateOnClick);
+            console.log('  Is explicitly true:', settings.autoGenerateOnClick === true);
+            
+            if (settings.autoGenerateOnClick !== true) {
                 console.log('❌ Auto-generate on click is DISABLED in extension settings');
                 console.log('📝 To enable: Open extension popup → Check "Auto-generate when clicking comment buttons"');
-                this.showTemporaryMessage(postContainer, '⚠️ Auto-generate disabled. Enable in extension popup.', 'warning');
+                // Don't show message as it might interfere, just log
                 return; // Let normal LinkedIn behavior proceed
             }
             
             if (!settings.geminiApiKey) {
                 console.log('❌ No Gemini API key configured');
                 console.log('📝 To configure: Open extension popup → Enter your Gemini API key');
-                this.showTemporaryMessage(postContainer, '⚠️ API key missing. Configure in extension popup.', 'warning');
+                // Don't show message as it might interfere, just log
                 return;
             }
             
@@ -1066,7 +1250,8 @@ class LinkedInCommentBot {
                         
                         if (chrome.runtime.lastError) {
                             console.error('❌ Chrome runtime error:', chrome.runtime.lastError);
-                            reject(new Error('Extension communication error: ' + chrome.runtime.lastError.message));
+                            const errorMessage = chrome.runtime.lastError.message || 'Unknown extension communication error';
+                            reject(new Error('Extension communication error: ' + errorMessage));
                         } else if (response && response.error) {
                             console.error('❌ Background script error:', response.error);
                             reject(new Error(response.error));
@@ -1081,12 +1266,14 @@ class LinkedInCommentBot {
                 } catch (error) {
                     console.error('❌ Error sending message to background:', error);
                     clearTimeout(timeout);
-                    reject(new Error('Failed to communicate with extension background script'));
+                    reject(new Error('Failed to communicate with extension background script: ' + error.message));
                 }
             });
         } catch (error) {
             console.error('❌ Error in generateComment method:', error);
             console.error('Error stack:', error.stack);
+            // Show user-friendly error message
+            this.showTemporaryMessage(document.body, `Comment generation failed: ${error.message}`, 'error');
             throw error;
         }
     }
